@@ -249,12 +249,15 @@ final class MoteurExtensions: NSObject, WKWebExtensionControllerDelegate {
 
     func webExtensionController(_ controller: WKWebExtensionController, presentActionPopup action: WKWebExtension.Action, for context: WKWebExtensionContext) async throws {
         guard let vc = action.popupViewController, let haut = Presentateur.sommet else { noter("Fenêtre : rien à présenter"); return }
-        if vc.parent != nil || vc.presentingViewController != nil { return }
-        // La fenêtre de WebKit dans NOTRE conteneur plein écran : WebKit ne peut plus la réduire
-        // à mi-hauteur, et sa fermeture (bouton ✓, fin du remplissage) ferme le conteneur.
-        let conteneur = ConteneurFenetreExtension(contenu: vc, action: action)
-        fenetreBitwarden = conteneur
-        haut.present(conteneur, animated: true)
+        if vc.presentingViewController != nil { return }
+        // Fenêtre de WebKit telle quelle (l'emballer dans un autre écran vidait la page de Bitwarden)
+        vc.modalPresentationStyle = .pageSheet
+        if let s = vc.sheetPresentationController {
+            s.detents = [.large()]
+            s.prefersGrabberVisible = true
+        }
+        fenetreBitwarden = vc
+        haut.present(vc, animated: true)
     }
 
     private func fermerFenetreBitwarden() {
@@ -371,79 +374,4 @@ extension Onglet: WKWebExtensionTab {
     func goForward(for context: WKWebExtensionContext) async throws { avancer() }
     func activate(for context: WKWebExtensionContext) async throws { Navigateur.partage.activer(self) }
     func close(for context: WKWebExtensionContext) async throws { Navigateur.partage.fermer(self) }
-}
-
-/// Plein écran qui accueille la fenêtre d'une extension (une feuille restait coincée à
-/// mi-hauteur : iOS suit la taille annoncée par la page de l'extension). Barre du haut avec ✕.
-@available(iOS 18.4, *)
-@MainActor
-final class ConteneurFenetreExtension: UIViewController {
-    private let contenu: UIViewController
-    private weak var action: WKWebExtension.Action?
-    private static let fond = UIColor(red: 0.07, green: 0.09, blue: 0.15, alpha: 1)
-
-    init(contenu: UIViewController, action: WKWebExtension.Action) {
-        self.contenu = contenu
-        self.action = action
-        super.init(nibName: nil, bundle: nil)
-        modalPresentationStyle = .overFullScreen
-        modalTransitionStyle = .coverVertical
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = Self.fond
-
-        let barre = UIView()
-        barre.backgroundColor = Self.fond
-        barre.translatesAutoresizingMaskIntoConstraints = false
-        let titre = UILabel()
-        titre.text = action?.webExtensionContext?.webExtension.displayShortName ?? "Extension"
-        titre.font = .systemFont(ofSize: 17, weight: .semibold)
-        titre.textColor = .white
-        titre.translatesAutoresizingMaskIntoConstraints = false
-        var c = UIButton.Configuration.plain()
-        c.image = UIImage(systemName: "xmark.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 26, weight: .regular))
-        c.baseForegroundColor = UIColor.white.withAlphaComponent(0.75)
-        let fermer = UIButton(configuration: c, primaryAction: UIAction { [weak self] _ in self?.fermer() })
-        fermer.accessibilityLabel = "Fermer"
-        fermer.translatesAutoresizingMaskIntoConstraints = false
-        barre.addSubview(titre)
-        barre.addSubview(fermer)
-        view.addSubview(barre)
-
-        addChild(contenu)
-        contenu.view.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(contenu.view)
-        let g = view.safeAreaLayoutGuide
-        NSLayoutConstraint.activate([
-            barre.topAnchor.constraint(equalTo: g.topAnchor),
-            barre.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            barre.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            barre.heightAnchor.constraint(equalToConstant: 52),
-            titre.centerYAnchor.constraint(equalTo: barre.centerYAnchor),
-            titre.leadingAnchor.constraint(equalTo: barre.leadingAnchor, constant: 18),
-            fermer.centerYAnchor.constraint(equalTo: barre.centerYAnchor),
-            fermer.trailingAnchor.constraint(equalTo: barre.trailingAnchor, constant: -8),
-            fermer.widthAnchor.constraint(equalToConstant: 52),
-            fermer.heightAnchor.constraint(equalToConstant: 52),
-            contenu.view.topAnchor.constraint(equalTo: barre.bottomAnchor),
-            contenu.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            contenu.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            contenu.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
-        contenu.didMove(toParent: self)
-    }
-
-    /// La page de l'extension annonce sa taille : ignorée (plein écran).
-    override func preferredContentSizeDidChange(forChildContentContainer container: any UIContentContainer) {}
-
-    private func fermer() {
-        action?.closePopup()
-        if presentingViewController != nil { dismiss(animated: true) }
-    }
 }
