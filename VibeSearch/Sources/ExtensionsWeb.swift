@@ -373,61 +373,77 @@ extension Onglet: WKWebExtensionTab {
     func close(for context: WKWebExtensionContext) async throws { Navigateur.partage.fermer(self) }
 }
 
-/// Feuille plein écran qui accueille la fenêtre d'une extension.
+/// Plein écran qui accueille la fenêtre d'une extension (une feuille restait coincée à
+/// mi-hauteur : iOS suit la taille annoncée par la page de l'extension). Barre du haut avec ✕.
 @available(iOS 18.4, *)
 @MainActor
-final class ConteneurFenetreExtension: UIViewController, UIAdaptivePresentationControllerDelegate {
+final class ConteneurFenetreExtension: UIViewController {
     private let contenu: UIViewController
     private weak var action: WKWebExtension.Action?
+    private static let fond = UIColor(red: 0.07, green: 0.09, blue: 0.15, alpha: 1)
 
     init(contenu: UIViewController, action: WKWebExtension.Action) {
         self.contenu = contenu
         self.action = action
         super.init(nibName: nil, bundle: nil)
-        modalPresentationStyle = .pageSheet
-        if let s = sheetPresentationController {
-            s.detents = [.large()]
-            s.prefersGrabberVisible = true
-        }
-        presentationController?.delegate = self
+        modalPresentationStyle = .overFullScreen
+        modalTransitionStyle = .coverVertical
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
+    override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIColor(red: 0.07, green: 0.09, blue: 0.15, alpha: 1)
+        view.backgroundColor = Self.fond
+
+        let barre = UIView()
+        barre.backgroundColor = Self.fond
+        barre.translatesAutoresizingMaskIntoConstraints = false
+        let titre = UILabel()
+        titre.text = action?.webExtensionContext?.webExtension.displayShortName ?? "Extension"
+        titre.font = .systemFont(ofSize: 17, weight: .semibold)
+        titre.textColor = .white
+        titre.translatesAutoresizingMaskIntoConstraints = false
+        var c = UIButton.Configuration.plain()
+        c.image = UIImage(systemName: "xmark.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 26, weight: .regular))
+        c.baseForegroundColor = UIColor.white.withAlphaComponent(0.75)
+        let fermer = UIButton(configuration: c, primaryAction: UIAction { [weak self] _ in self?.fermer() })
+        fermer.accessibilityLabel = "Fermer"
+        fermer.translatesAutoresizingMaskIntoConstraints = false
+        barre.addSubview(titre)
+        barre.addSubview(fermer)
+        view.addSubview(barre)
+
         addChild(contenu)
         contenu.view.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(contenu.view)
+        let g = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
-            contenu.view.topAnchor.constraint(equalTo: view.topAnchor),
-            contenu.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            barre.topAnchor.constraint(equalTo: g.topAnchor),
+            barre.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            barre.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            barre.heightAnchor.constraint(equalToConstant: 52),
+            titre.centerYAnchor.constraint(equalTo: barre.centerYAnchor),
+            titre.leadingAnchor.constraint(equalTo: barre.leadingAnchor, constant: 18),
+            fermer.centerYAnchor.constraint(equalTo: barre.centerYAnchor),
+            fermer.trailingAnchor.constraint(equalTo: barre.trailingAnchor, constant: -8),
+            fermer.widthAnchor.constraint(equalToConstant: 52),
+            fermer.heightAnchor.constraint(equalToConstant: 52),
+            contenu.view.topAnchor.constraint(equalTo: barre.bottomAnchor),
             contenu.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             contenu.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            contenu.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         contenu.didMove(toParent: self)
     }
 
-    /// La fenêtre de WebKit annonce sa propre taille (≈ 600 points) : ignorée, la feuille reste plein écran.
+    /// La page de l'extension annonce sa taille : ignorée (plein écran).
     override func preferredContentSizeDidChange(forChildContentContainer container: any UIContentContainer) {}
-    override var preferredContentSize: CGSize {
-        get { .zero }
-        set {}
-    }
 
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        guard let s = sheetPresentationController else { return }
-        s.animateChanges {
-            let haute = UISheetPresentationController.Detent.custom(identifier: .init("vibe.haute")) { $0.maximumDetentValue }
-            s.detents = [haute]
-            s.selectedDetentIdentifier = haute.identifier
-        }
-    }
-
-    /// Glissée vers le bas : la fenêtre de l'extension est fermée proprement.
-    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+    private func fermer() {
         action?.closePopup()
+        if presentingViewController != nil { dismiss(animated: true) }
     }
 }
