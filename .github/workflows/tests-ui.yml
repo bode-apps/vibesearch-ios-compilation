@@ -1,0 +1,51 @@
+name: Tests d'interface (simulateur)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ui:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Ressources
+        run: |
+          npm ci
+          npm run ressources
+      - name: Projet
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Tests
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k in sorted(d, reverse=True) for x in d[k] if x['name'].startswith('iPhone') and 'Pro' in x['name'] and 'Max' not in x['name']))")
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          set -o pipefail
+          xcodebuild test -project VibeSearch.xcodeproj -scheme VibeSearch -configuration Debug \
+            -destination "id=$UDID" -derivedDataPath build -resultBundlePath resultats.xcresult \
+            2>&1 | tee test.log | grep -E "error:|Test Case|passed|failed|XCTAssert" | tail -n 60
+      - name: Rapports de plantage
+        if: always()
+        run: |
+          mkdir -p rapports
+          cp ~/Library/Logs/DiagnosticReports/*VibeSearch* rapports/ 2>/dev/null || true
+          find ~/Library/Developer/CoreSimulator/Devices -path "*DiagnosticReports*" -name "*VibeSearch*" -exec cp {} rapports/ \; 2>/dev/null || true
+          ls -la rapports
+          for f in rapports/*; do [ -f "$f" ] || continue; echo "=== $f"; head -c 6000 "$f"; echo; done; true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rapports-ui
+          path: |
+            rapports
+            test.log
+          retention-days: 7

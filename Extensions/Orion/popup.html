@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 16px; min-width: 260px; background: #0a0920; color: #eeebff; font: 15px -apple-system, system-ui; }
+  h1 { font-size: 17px; margin: 0 0 12px; color: #a99cff; }
+  label { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: #191643; }
+  input { accent-color: #7c6cff; width: 18px; height: 18px; }
+  button { width: 100%; margin-top: 10px; padding: 10px; border: 0; border-radius: 12px; color: #fff; font: 600 15px -apple-system; background: #5b4bd6; }
+  p { color: #aaa5d6; font-size: 13px; margin: 10px 2px 0; }
+</style>
+</head>
+<body>
+  <h1>VibeSearch Passerelle</h1>
+  <label><input type="checkbox" id="actif"> Envoyer les pages à VibeSearch</label>
+  <button id="pause">Rester dans Orion 10 minutes</button>
+  <p id="etat"></p>
+  <script src="popup.js"></script>
+</body>
+</html>

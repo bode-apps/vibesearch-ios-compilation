@@ -1,0 +1,151 @@
+name: Appli iPhone (.ipa)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Bitwarden (version Safari) compilé depuis son code officiel, puis livré dans l'appli.
+  # Mis en cache : recompilé seulement quand la version ou l'adaptation change.
+  bitwarden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      BW_VERSION: "2026.11.0"
+      HUSKY: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: bitwarden-build
+          key: bitwarden-safari-mv3-${{ env.BW_VERSION }}-${{ hashFiles('outils/bitwarden/**') }}
+
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Code source officiel (GitHub de Bitwarden)
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/bw
+          gh release download "browser-v$BW_VERSION" -R bitwarden/clients -p "oss-browser-source-$BW_VERSION.zip" -D /tmp/bw
+          cd /tmp/bw && unzip -q "oss-browser-source-$BW_VERSION.zip"
+
+      - name: Compilation (Safari, manifeste v3)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cd /tmp/bw/browser-source
+          npm ci --no-audit --no-fund
+          rm -rf node_modules/@bitwarden/commercial-sdk-internal
+          node "$GITHUB_WORKSPACE/outils/bitwarden/adapter.mjs" .
+          cd apps/browser
+          MANIFEST_VERSION=3 npm run build:prod:safari
+          mkdir -p "$GITHUB_WORKSPACE/bitwarden-build"
+          cp -R build/. "$GITHUB_WORKSPACE/bitwarden-build/"
+          find "$GITHUB_WORKSPACE/bitwarden-build" -name '*.map' -delete
+          du -sh "$GITHUB_WORKSPACE/bitwarden-build"
+          head -c 1500 "$GITHUB_WORKSPACE/bitwarden-build/manifest.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bitwarden-extension
+          path: bitwarden-build
+          retention-days: 7
+
+  ipa:
+    needs: bitwarden
+    if: always()
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Outils et tests du convertisseur
+        run: |
+          npm ci
+          npm test
+
+      - name: Listes de blocage fraîches + scripts de page
+        run: npm run ressources
+
+      - name: Vérification des règles par le vrai compilateur WebKit
+        run: swift outils/verifier-regles.swift VibeSearch/Ressources/Generees
+
+      - name: Bitwarden dans l'appli
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: bitwarden-extension
+          path: VibeSearch/ExtensionsWeb/bitwarden
+
+      - name: Journal des erreurs de l'extension
+        run: bash outils/extensions/preparer.sh VibeSearch/ExtensionsWeb/bitwarden
+
+      - name: Adresse du serveur relais (secret du dépôt de compilation)
+        env:
+          HOTE_RELAIS: ${{ secrets.HOTE_RELAIS }}
+        run: |
+          if grep -q "__HOTE_RELAIS__" VibeSearch/Sources/Discussion.swift; then
+            sed -i '' "s/__HOTE_RELAIS__/${HOTE_RELAIS}/" VibeSearch/Sources/Discussion.swift
+          fi
+
+      - name: Projet Xcode (XcodeGen)
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Compilation (non signée, Sideloadly signera)
+        run: |
+          xcodebuild -version
+          set -o pipefail
+          xcodebuild \
+            -project VibeSearch.xcodeproj \
+            -scheme VibeSearch \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build > build.log 2>&1 || { grep -E "error:" build.log | sort -u | head -n 60; exit 1; }
+          grep -E "warning: .*(nearly matches|never used)" build.log || true
+          grep -E "BUILD SUCCEEDED" build.log
+
+      - name: Paquet .ipa
+        run: |
+          rm -rf Payload && mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/VibeSearch.app Payload/
+          zip -qry VibeSearch.ipa Payload
+          ls -lh VibeSearch.ipa
+          du -sh Payload/VibeSearch.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VibeSearch-ipa
+          path: VibeSearch.ipa
+          retention-days: 2
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: journal-compilation
+          path: build.log
+          retention-days: 7
+          if-no-files-found: ignore

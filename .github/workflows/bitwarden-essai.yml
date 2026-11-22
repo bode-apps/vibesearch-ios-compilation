@@ -1,0 +1,85 @@
+name: Essai Bitwarden (simulateur)
+
+# Lancé à la main : appli + Bitwarden dans le simulateur iPhone, ouverture de la fenêtre
+# Bitwarden, captures d'écran et journal de l'extension (erreurs JavaScript et WebKit).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  simulateur:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      BW_VERSION: "2026.11.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bitwarden déjà compilé (cache de l'appli)
+        id: bw
+        uses: actions/cache/restore@v4
+        with:
+          path: bitwarden-build
+          key: bitwarden-safari-mv3-${{ env.BW_VERSION }}-${{ hashFiles('outils/bitwarden/**') }}
+          fail-on-cache-miss: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Ressources + Bitwarden avec journal
+        run: |
+          npm ci
+          npm run ressources
+          mkdir -p VibeSearch/ExtensionsWeb/bitwarden
+          cp -R bitwarden-build/. VibeSearch/ExtensionsWeb/bitwarden/
+          bash outils/extensions/preparer.sh VibeSearch/ExtensionsWeb/bitwarden
+
+      - name: Adresse du serveur relais (secret du dépôt de compilation)
+        env:
+          HOTE_RELAIS: ${{ secrets.HOTE_RELAIS }}
+        run: |
+          if grep -q "__HOTE_RELAIS__" VibeSearch/Sources/Discussion.swift; then
+            sed -i '' "s/__HOTE_RELAIS__/${HOTE_RELAIS}/" VibeSearch/Sources/Discussion.swift
+          fi
+
+      - name: Compilation simulateur
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -project VibeSearch.xcodeproj -scheme VibeSearch -configuration Release \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- build > build-sim.log 2>&1 || { grep -E "error:" build-sim.log | sort -u | head -n 40; exit 1; }
+          tail -n 2 build-sim.log
+
+      - name: Scénario Bitwarden
+        run: |
+          mkdir -p captures
+          APP=build/Build/Products/Release-iphonesimulator/VibeSearch.app
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k in sorted(d, reverse=True) for x in d[k] if x['name'].startswith('iPhone') and 'Pro' in x['name'] and 'Max' not in x['name']))")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl ui "$UDID" appearance dark
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" fr.vibe.search -ouvrir "https://accounts.google.com/" -bitwarden
+          for t in 12 24 40 70; do
+            sleep $(( t - ${prev:-0} )); prev=$t
+            xcrun simctl io "$UDID" screenshot "captures/bitwarden-${t}s.png"
+          done
+          xcrun simctl spawn "$UDID" log show --last 10m --style compact --predicate 'process == "VibeSearch" OR process CONTAINS "WebContent"' > captures/journal-complet.txt || true
+          grep -E "VibeExtension" captures/journal-complet.txt > captures/journal-extension.txt || true
+          grep -iE "extension|serviceworker|service worker" captures/journal-complet.txt | grep -viE "VibeExtension" | tail -n 150 > captures/journal-webkit.txt || true
+          echo "===== Journal de l'extension ====="
+          cat captures/journal-extension.txt | sed 's/^.*\[VibeExtension\] //' | head -n 150
+          echo "===== WebKit (extrait) ====="
+          tail -n 60 captures/journal-webkit.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: essai-bitwarden
+          path: captures
+          retention-days: 7

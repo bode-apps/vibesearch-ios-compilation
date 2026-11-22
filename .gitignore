@@ -1,0 +1,8 @@
+node_modules/
+VibeSearch/Ressources/Generees/
+VibeSearch.xcodeproj/
+build/
+*.ipa
+Payload/
+.DS_Store
+VibeSearch/ExtensionsWeb/bitwarden/

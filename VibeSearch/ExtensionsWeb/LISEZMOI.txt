@@ -1,0 +1,2 @@
+Extensions web livrées dans l appli (copiées par la compilation GitHub).
+bitwarden/ : version Safari de Bitwarden compilée depuis son code officiel (outils/bitwarden).

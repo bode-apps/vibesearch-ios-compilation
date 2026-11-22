@@ -1,0 +1,14 @@
+{
+  "name": "vibesearch-ios-outils",
+  "private": true,
+  "type": "module",
+  "description": "Outils de construction de VibeSearch pour iPhone (listes de blocage, scripts de page)",
+  "scripts": {
+    "test": "node --test tests/convertir.test.mjs",
+    "ressources": "node outils/listes.mjs && node outils/paquets.mjs"
+  },
+  "devDependencies": {
+    "@duckduckgo/autoconsent": "18.0.0",
+    "esbuild": "0.25.12"
+  }
+}

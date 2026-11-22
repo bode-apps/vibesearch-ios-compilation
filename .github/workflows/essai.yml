@@ -1,0 +1,82 @@
+name: Essai dans le simulateur
+
+# Lancé à la main (gh workflow run essai.yml) : compile pour le simulateur iPhone, ouvre
+# quelques pages et rapporte des captures d'écran + le journal de l'appli.
+on:
+  workflow_dispatch:
+    inputs:
+      pages:
+        description: "Adresses à ouvrir (séparées par des espaces)"
+        required: false
+        default: "https://www.lemonde.fr/ https://m.youtube.com/watch?v=jNQXAC9IVRw https://www.google.com/search?udm=14&q=tour+eiffel http://neverssl.com/"
+
+permissions:
+  contents: read
+
+jobs:
+  simulateur:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Ressources
+        run: |
+          npm ci
+          npm run ressources
+      - name: Projet + compilation simulateur
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          set -o pipefail
+          xcodebuild -project VibeSearch.xcodeproj -scheme VibeSearch -configuration Release \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- build > build-sim.log 2>&1 || { grep -E "error:" build-sim.log | sort -u | head -n 40; exit 1; }
+          tail -n 3 build-sim.log
+      - name: Scénario
+        env:
+          PAGES: ${{ github.event.inputs.pages }}
+        run: |
+          mkdir -p captures
+          APP=build/Build/Products/Release-iphonesimulator/VibeSearch.app
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k in sorted(d, reverse=True) for x in d[k] if x['name'].startswith('iPhone') and 'Pro' in x['name'] and 'Max' not in x['name']))")
+          echo "Simulateur : $UDID"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl ui "$UDID" appearance dark
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" fr.vibe.search
+          sleep 12
+          xcrun simctl io "$UDID" screenshot captures/01-accueil.png
+          lancer() { xcrun simctl terminate "$UDID" fr.vibe.search || true; xcrun simctl launch "$UDID" fr.vibe.search "$@"; }
+          n=2
+          for p in $PAGES; do
+            lancer -ouvrir "$p"
+            sleep 20
+            xcrun simctl io "$UDID" screenshot "captures/0$n-page.png"
+            n=$((n+1))
+          done
+          # Panneaux : menu sur une page, mode lecture, réglages, discussion
+          lancer -ouvrir "https://fr.wikipedia.org/wiki/Paris" -panneau menu
+          sleep 16; xcrun simctl io "$UDID" screenshot captures/10-menu.png
+          lancer -ouvrir "https://fr.wikipedia.org/wiki/Paris" -panneau lecteur
+          sleep 18; xcrun simctl io "$UDID" screenshot captures/11-lecture.png
+          lancer -panneau reglages
+          sleep 12; xcrun simctl io "$UDID" screenshot captures/12-reglages.png
+          lancer -panneau discussion
+          sleep 12; xcrun simctl io "$UDID" screenshot captures/13-discussion.png
+          lancer -grille
+          sleep 6
+          xcrun simctl io "$UDID" screenshot captures/09-grille.png
+          xcrun simctl spawn "$UDID" log show --last 10m --style compact --predicate 'process == "VibeSearch"' > captures/journal.txt || true
+          grep -iE "bloqueur|fatal|crash|assert" captures/journal.txt | tail -n 40 || true
+          ls -la ~/Library/Logs/DiagnosticReports 2>/dev/null | grep -i vibe || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: captures-simulateur
+          path: captures
+          retention-days: 7

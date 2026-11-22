@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 16px; width: 280px; background: #0a0920; color: #eeebff; font: 15px -apple-system, system-ui; }
+  h1 { font-size: 17px; margin: 0 0 12px; background: linear-gradient(135deg,#38bdf8,#7c6cff,#a855f7); -webkit-background-clip: text; color: transparent; }
+  label { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin: 6px 0; border-radius: 12px; background: #191643; }
+  input { accent-color: #7c6cff; width: 18px; height: 18px; }
+  button { width: 100%; margin-top: 10px; padding: 10px; border: 0; border-radius: 12px; color: #fff; font: 600 15px -apple-system; background: linear-gradient(135deg,#38bdf8,#7c6cff,#a855f7); }
+  p { color: #aaa5d6; font-size: 13px; margin: 10px 2px 0; }
+</style>
+</head>
+<body>
+  <h1>VibeSearch</h1>
+  <label><input type="checkbox" id="actif"> Ouvrir dans VibeSearch</label>
+  <label><input type="radio" name="mode" value="tout"> Toutes les pages</label>
+  <label><input type="radio" name="mode" value="liens"> Seulement les liens touchés</label>
+  <button id="pause">Rester dans Safari 10 minutes</button>
+  <button id="ici">Ouvrir cette page dans VibeSearch</button>
+  <p>Astuce : « Toutes les pages » fait de VibeSearch votre navigateur pour tous les liens qui s'ouvrent dans Safari.</p>
+  <script src="popup.js"></script>
+</body>
+</html>
